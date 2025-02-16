@@ -9,10 +9,18 @@ from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
+from alpaca.data.requests import StockLatestQuoteRequest
 from alpaca.data.timeframe import TimeFrame
 
 # Configure logger
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("/home/alex-shanyi-yuan/alpaca-trade-bot/day_trading.log"),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 # Load API keys
@@ -64,27 +72,23 @@ class AlpacaTradingBot:
         return df
 
     def get_latest_price(self):
-        """Fetch the latest stock price"""
+        """Get latest price"""
         try:
-            bars = self.data_client.get_stock_bars(
-                StockBarsRequest(
-                    symbol_or_symbols=self.symbol,
-                    timeframe=TimeFrame.Day,
-                    limit=1
-                )
-            )
-            return bars.df['close'].iloc[-1] if not bars.df.empty else None
+            request_param = StockLatestQuoteRequest(symbol_or_symbols=[self.symbol])
+            latest_quote = self.data_client.get_stock_latest_quote(request_param)
+            return latest_quote[self.symbol]
         except Exception as e:
-            logger.error(f"Error fetching latest price: {e}")
+            logger.error(f"Error getting price: {e}")
             return None
 
     def place_bracket_order(self, side):
         """Place an order with stop loss and take profit"""
         try:
-            current_price = self.get_latest_price()
-            if current_price is None:
+            latest_quote = self.get_latest_price()
+            if latest_quote is None:
                 return False
-
+            
+            current_price = latest_quote.bid_price
             stop_loss_price = current_price * (1 - self.stop_loss_pct) if side == OrderSide.BUY else current_price * (1 + self.stop_loss_pct)
             take_profit_price = current_price * (1 + self.take_profit_pct) if side == OrderSide.BUY else current_price * (1 - self.take_profit_pct)
 
@@ -113,7 +117,6 @@ class AlpacaTradingBot:
 
         df = self.calculate_signals(df)
         latest_signal = df.iloc[-1]
-        print(latest_signal)
         if latest_signal['buy_signal']:
             self.place_bracket_order(OrderSide.BUY)
         elif latest_signal['sell_signal']:
