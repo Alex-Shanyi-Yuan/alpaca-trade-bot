@@ -16,7 +16,14 @@ from alpaca.data.requests import StockBarsRequest # stock bar information
 from alpaca.data.requests import StockQuotesRequest # get more info then just the latests
 
 # configure logger
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("/home/alex-shanyi-yuan/alpaca-trade-bot/liang_hua_trading.log"),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 class AlpacaTradingBot:
@@ -149,9 +156,7 @@ class AlpacaTradingBot:
         try:
             while True:
                 if not self.is_market_open():
-                    logger.info("Market closed, waiting till it open")
-                    time.sleep(60)
-                    continue
+                    raise KeyboardInterrupt("Market closed, waiting till it open") 
 
                 # reset can_trade only if:
                 # 1. cooldown period has passed
@@ -163,7 +168,8 @@ class AlpacaTradingBot:
 
                 self.trade_logic()
                 time.sleep(30)
-        except KeyboardInterrupt:
+        except KeyboardInterrupt as e:
+            logger.info(f"Need to stop due to: {e}")
             logger.info("Stoping bot...")
             self.close_all_position_and_order()
 
