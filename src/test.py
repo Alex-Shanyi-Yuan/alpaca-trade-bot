@@ -1,86 +1,58 @@
-# load env var
 import os
+import vectorbt as vbt
+import datetime
+import numpy as np
 from dotenv import load_dotenv
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockBarsRequest
+from alpaca.data.timeframe import TimeFrame
 
-from datetime import datetime # handle datetime
-
-from alpaca.trading.client import TradingClient # allow connect to account
-from alpaca.data import StockHistoricalDataClient, StockTradesRequest # get historical data and trade request object
-from alpaca.trading.requests import MarketOrderRequest # make trade request at current price of stock
-from alpaca.trading.requests import LimitOrderRequest # make trade request at specified price of stock
-from alpaca.trading.enums import OrderSide # OrderSide (buy or short) 
-from alpaca.trading.enums import TimeInForce # TimeInForce (a day, immediently etc.)
-from alpaca.trading.requests import GetOrdersRequest # reuqest to get current opened order
-from alpaca.trading.enums import QueryOrderStatus # get order status types
-from alpaca.data.live import StockDataStream # get trade info live
-
-# account setup
+# Load API keys
 load_dotenv()
-ALPACA_KEY = os.getenv('ALPACA_KEY')
-ALPACA_SECRET = os.getenv('ALPACA_SECRET')
+API_KEY = os.getenv('ALPACA_KEY')
+API_SECRET = os.getenv('ALPACA_SECRET')
 
-# account access client
-tradeing_client = TradingClient(ALPACA_KEY, ALPACA_SECRET)
+# 1. Fetch data
+data_client = StockHistoricalDataClient(API_KEY, API_SECRET)
+bars = data_client.get_stock_bars(
+    StockBarsRequest(
+        symbol_or_symbols="SPY",
+        timeframe=TimeFrame.Day,
+        start=datetime.datetime(2020, 1, 1),
+        end=datetime.datetime(2023, 1, 1)
+    )
+)
+df = bars.df
 
-# data getting client
-data_client = StockHistoricalDataClient(ALPACA_KEY, ALPACA_SECRET)
+# 2. Calculate indicators: 50-day and 200-day simple moving averages
+df['sma_50'] = df['close'].rolling(50).mean()
+df['sma_200'] = df['close'].rolling(200).mean()
 
-# trade stream
-# stream = StockDataStream(ALPACA_KEY, ALPACA_SECRET)
-# async def handle_trade(data):
-#     print(data)
-# stream.subscribe_trades(handle_trade, 'AAPL')
-# stream.run()
+# 3. Define improved strategy (Dual Moving Average Crossover)
+# Entry when price crosses above the 50-day SMA and the 50-day SMA is above the 200-day SMA.
+entries = (
+    (df['close'] > df['sma_50']) & 
+    (df['close'].shift(1) <= df['sma_50'].shift(1)) & 
+    (df['sma_50'] > df['sma_200'])
+)
 
-# print general account information
-print(tradeing_client.get_account().account_number)
-print(tradeing_client.get_account().buying_power)
+# Exit when price crosses below the 50-day SMA or the trend reverses (50-day SMA falls below 200-day SMA).
+exits = (
+    ((df['close'] < df['sma_50']) & (df['close'].shift(1) >= df['sma_50'].shift(1))) | 
+    (df['sma_50'] < df['sma_200'])
+)
 
-# get current holdings:
-positions = tradeing_client.get_all_positions()
-for position in positions:
-    print(position.symbol, position.current_price)
+# 4. Run backtest
+pf = vbt.Portfolio.from_signals(
+    close=df['close'],
+    entries=entries,
+    exits=exits,
+    sl_stop=0.02,  # 2% stop-loss
+    tp_stop=0.04,  # 4% take-profit
+    fees=0.001,
+    freq='D'
+)
 
-# liquidify all holdings:
-# tradeing_client.close_all_positions(True)
-
-# print trading informaiton
-# request_param = StockTradesRequest(
-#     symbol_or_symbols='AAPL', # apple stock
-#     start=datetime(2025,2,14,14,30),
-#     end=datetime(2025,2,14,14,45),
-# ) # trade information within first 15 minutes of market open in utc time
-# trades = data_client.get_stock_trades(request_param)
-# print(trades.data['AAPL'][0])
-
-# make a trade for the market price of apple
-# market_order_param = MarketOrderRequest(
-#     symbol='AAPL',
-#     qty=1,
-#     side=OrderSide.BUY,
-#     time_in_force=TimeInForce.DAY
-# )
-# market_order = tradeing_client.submit_order(market_order_param)
-# print(market_order)
-
-# make limit buy at specified price
-# limit_order_param = LimitOrderRequest(
-#     symbol='AAPL',
-#     qty=1,
-#     side=OrderSide.BUY,
-#     time_in_force=TimeInForce.DAY,
-#     limit_price=240.84
-# )
-# limit_order = tradeing_client.submit_order(limit_order_param)
-# print(limit_order)
-
-# get current trade orders in the account
-# request_params = GetOrdersRequest(
-#     status=QueryOrderStatus.OPEN,
-#     side=OrderSide.BUY,
-# )
-# orders = tradeing_client.get_orders(request_params)
-# # cancel the order
-# for order in orders:
-#     tradeing_client.cancel_order_by_id(order.id)
-#     print(f'canceled order number: {order.id}')
+# 5. Analyze results
+print(pf.stats())
+pf.plot().show()

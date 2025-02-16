@@ -1,2 +1,4 @@
 alpaca-py==0.38.0
 python-dotenv==1.0.1
+vectorbt==0.27.2
+pandas_ta==0.3.14
